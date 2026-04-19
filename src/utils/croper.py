@@ -21,24 +21,106 @@ class Preprocesser:
         self.predictor = KeypointExtractor(device)
 
     def get_landmark(self, img_np):
-        """get landmark with dlib
+        """get landmark with RetinaFace, with progressive confidence fallback.
+        Handles RGBA, grayscale, landscape 16:9, low-contrast, and Blackwell
+        numerical precision differences vs older PyTorch versions.
         :return: np.array shape=(68, 2)
         """
-        with torch.no_grad():
-            dets = self.predictor.det_net.detect_faces(img_np, 0.50)
+        import cv2 as _cv2
+
+        # --- Normalize to 3-channel uint8 RGB ---
+        if img_np.ndim == 2:
+            img_np = _cv2.cvtColor(img_np, _cv2.COLOR_GRAY2RGB)
+        elif img_np.shape[2] == 4:
+            img_np = _cv2.cvtColor(img_np, _cv2.COLOR_RGBA2RGB)
+        if img_np.dtype != 'uint8':
+            img_np = img_np.astype('uint8')
+
+        h, w = img_np.shape[:2]
+        dets = None
+        scale_used = 1.0
+        img_used = img_np
+
+        def _detect(image, threshold):
+            with torch.no_grad():
+                return self.predictor.det_net.detect_faces(image, threshold)
+
+        def _map_back(dets, scale):
+            if len(dets) > 0 and scale != 1.0:
+                dets = dets.copy()
+                dets[:, :4] /= scale
+            return dets
+
+        # ------------------------------------------------------------
+        # Stage 1: original resolution, threshold 0.50
+        # ------------------------------------------------------------
+        dets = _detect(img_np, 0.50)
+
+        # ------------------------------------------------------------
+        # Stage 2: original resolution, relaxed to 0.30
+        # ------------------------------------------------------------
+        if len(dets) == 0:
+            dets = _detect(img_np, 0.30)
+
+        # ------------------------------------------------------------
+        # Stage 3: upscale to 1024px longest edge, threshold 0.30
+        # Fixes: face small relative to wide 16:9 frame
+        # ------------------------------------------------------------
+        if len(dets) == 0:
+            s3_scale = min(1024 / max(h, w), 2.0)  # only upscale, cap at 2×
+            if s3_scale != 1.0:
+                s3_img = _cv2.resize(img_np, (int(w * s3_scale), int(h * s3_scale)),
+                                     interpolation=_cv2.INTER_LINEAR)
+                s3_dets = _detect(s3_img, 0.30)
+                dets = _map_back(s3_dets, s3_scale)
+
+        # ------------------------------------------------------------
+        # Stage 4: center-square crop, threshold 0.30
+        # Fixes: landscape image where letterbox sides confuse the net
+        # ------------------------------------------------------------
+        if len(dets) == 0:
+            side = min(h, w)
+            cy, cx = h // 2, w // 2
+            y1, y2 = cy - side // 2, cy + side // 2
+            x1, x2 = cx - side // 2, cx + side // 2
+            crop = img_np[y1:y2, x1:x2]
+            crop_dets = _detect(crop, 0.30)
+            if len(crop_dets) > 0:
+                crop_dets = crop_dets.copy()
+                crop_dets[:, 0] += x1
+                crop_dets[:, 2] += x1
+                crop_dets[:, 1] += y1
+                crop_dets[:, 3] += y1
+            dets = crop_dets
+
+        # ------------------------------------------------------------
+        # Stage 5: CLAHE enhancement + 0.15 threshold, last resort
+        # ------------------------------------------------------------
+        if len(dets) == 0:
+            lab = _cv2.cvtColor(img_np, _cv2.COLOR_RGB2LAB)
+            l_ch, a_ch, b_ch = _cv2.split(lab)
+            clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            l_ch = clahe.apply(l_ch)
+            enhanced = _cv2.cvtColor(_cv2.merge([l_ch, a_ch, b_ch]), _cv2.COLOR_LAB2RGB)
+            dets = _detect(enhanced, 0.15)
 
         if len(dets) == 0:
             return None
+
         det = dets[0]
+        # Clamp bbox to image bounds before slicing
+        x1 = max(int(det[0]), 0)
+        y1 = max(int(det[1]), 0)
+        x2 = min(int(det[2]), img_np.shape[1])
+        y2 = min(int(det[3]), img_np.shape[0])
+        img_crop = img_np[y1:y2, x1:x2]
+        lm = landmark_98_to_68(self.predictor.detector.get_landmarks(img_crop))
 
-        img = img_np[int(det[1]):int(det[3]), int(det[0]):int(det[2]), :]
-        lm = landmark_98_to_68(self.predictor.detector.get_landmarks(img)) # [0]
-
-        #### keypoints to the original location
-        lm[:,0] += int(det[0])
-        lm[:,1] += int(det[1])
+        lm[:, 0] += x1
+        lm[:, 1] += y1
 
         return lm
+
 
     def align_face(self, img, lm, output_size=1024):
         """

@@ -188,6 +188,17 @@ def generate(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to save uploaded files: {e}")
 
+    # Normalize image to clean 3-channel RGB PNG regardless of what was uploaded
+    # (handles RGBA PNGs, CMYK JPEGs, palette-mode images, etc.)
+    try:
+        from PIL import Image as _PILImage
+        with _PILImage.open(image_path) as _img:
+            _img_rgb = _img.convert("RGB")
+        image_path = os.path.join(work_dir, "input.png")
+        _img_rgb.save(image_path, "PNG")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not decode image file: {e}")
+
     # ------------------------------------------------------------------
     # Run inference (serialized — one generation at a time)
     # ------------------------------------------------------------------
