@@ -43,12 +43,12 @@ class SadTalker():
         length_of_audio = 0, use_blink=True,
         result_dir='./results/'):
 
-        self.sadtalker_paths = init_path(self.checkpoint_path, self.config_path, size, False, preprocess)
-        print(self.sadtalker_paths)
+        sadtalker_paths = init_path(self.checkpoint_path, self.config_path, size, False, preprocess)
+        print(sadtalker_paths)
             
-        self.audio_to_coeff = Audio2Coeff(self.sadtalker_paths, self.device)
-        self.preprocess_model = CropAndExtract(self.sadtalker_paths, self.device)
-        self.animate_from_coeff = AnimateFromCoeff(self.sadtalker_paths, self.device)
+        audio_to_coeff = Audio2Coeff(sadtalker_paths, self.device)
+        preprocess_model = CropAndExtract(sadtalker_paths, self.device)
+        animate_from_coeff = AnimateFromCoeff(sadtalker_paths, self.device)
 
         time_tag = str(uuid.uuid4())
         save_dir = os.path.join(result_dir, time_tag)
@@ -93,7 +93,7 @@ class SadTalker():
         #crop image and extract 3dmm from image
         first_frame_dir = os.path.join(save_dir, 'first_frame_dir')
         os.makedirs(first_frame_dir, exist_ok=True)
-        first_coeff_path, crop_pic_path, crop_info = self.preprocess_model.generate(pic_path, first_frame_dir, preprocess, True, size)
+        first_coeff_path, crop_pic_path, crop_info = preprocess_model.generate(pic_path, first_frame_dir, preprocess, True, size)
         
         if first_coeff_path is None:
             raise AttributeError("No face is detected")
@@ -104,7 +104,7 @@ class SadTalker():
             ref_video_frame_dir = os.path.join(save_dir, ref_video_videoname)
             os.makedirs(ref_video_frame_dir, exist_ok=True)
             print('3DMM Extraction for the reference video providing pose')
-            ref_video_coeff_path, _, _ =  self.preprocess_model.generate(ref_video, ref_video_frame_dir, preprocess, source_image_flag=False)
+            ref_video_coeff_path, _, _ =  preprocess_model.generate(ref_video, ref_video_frame_dir, preprocess, source_image_flag=False)
         else:
             ref_video_coeff_path = None
 
@@ -129,20 +129,20 @@ class SadTalker():
 
         #audio2ceoff
         if use_ref_video and ref_info == 'all':
-            coeff_path = ref_video_coeff_path # self.audio_to_coeff.generate(batch, save_dir, pose_style, ref_pose_coeff_path)
+            coeff_path = ref_video_coeff_path # audio_to_coeff.generate(batch, save_dir, pose_style, ref_pose_coeff_path)
         else:
             batch = get_data(first_coeff_path, audio_path, self.device, ref_eyeblink_coeff_path=ref_eyeblink_coeff_path, still=still_mode, idlemode=use_idle_mode, length_of_audio=length_of_audio, use_blink=use_blink) # longer audio?
-            coeff_path = self.audio_to_coeff.generate(batch, save_dir, pose_style, ref_pose_coeff_path)
+            coeff_path = audio_to_coeff.generate(batch, save_dir, pose_style, ref_pose_coeff_path)
 
         #coeff2video
         data = get_facerender_data(coeff_path, crop_pic_path, first_coeff_path, audio_path, batch_size, still_mode=still_mode, preprocess=preprocess, size=size, expression_scale = exp_scale)
-        return_path = self.animate_from_coeff.generate(data, save_dir,  pic_path, crop_info, enhancer='gfpgan' if use_enhancer else None, preprocess=preprocess, img_size=size)
+        return_path = animate_from_coeff.generate(data, save_dir,  pic_path, crop_info, enhancer='gfpgan' if use_enhancer else None, preprocess=preprocess, img_size=size)
         video_name = data['video_name']
         print(f'The generated video is named {video_name} in {save_dir}')
 
-        del self.preprocess_model
-        del self.audio_to_coeff
-        del self.animate_from_coeff
+        del preprocess_model
+        del audio_to_coeff
+        del animate_from_coeff
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

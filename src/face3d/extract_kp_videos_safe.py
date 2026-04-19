@@ -70,7 +70,7 @@ class KeypointExtractor():
                     with torch.no_grad():
                         # face detection -> face alignment.
                         img = np.array(images)
-                        bboxes = self.det_net.detect_faces(images, 0.97)
+                        bboxes = self.det_net.detect_faces(images, 0.50)
                         
                         bboxes = bboxes[0]
                         img = img[int(bboxes[1]):int(bboxes[3]), int(bboxes[0]):int(bboxes[2]), :]

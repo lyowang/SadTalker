@@ -170,7 +170,7 @@ def run_extension_installer(extension_dir):
 def prepare_environment():
     global skip_install
 
-    torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu113")
+    torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==2.7.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128")
 
     ## check windows 
     if sys.platform != 'win32':
@@ -183,7 +183,7 @@ def prepare_environment():
     print(f"Python {sys.version}")
     print(f"Commit hash: {commit}")
 
-    if not is_installed("torch") or not is_installed("torchvision"):
+    if not is_installed("torch") or not is_installed("torchvision") or "+cu128" not in run_python("import torch; print(torch.version.cuda if torch.cuda.is_available() else 'None')"):
         run(f'"{python}" -m {torch_command}', "Installing torch and torchvision", "Couldn't install torch", live=True)
 
     run_pip(f"install -r \"{requirements_file}\"", "requirements for SadTalker WebUI (may take longer time in first time)")
@@ -192,12 +192,28 @@ def prepare_environment():
         run_pip(f"install TTS", "install TTS individually in SadTalker, which might not work on windows.")
 
 
+def inject_ffmpeg():
+    # Automatically inject FFmpeg and ffprobe binary into PATH to prevent audio loading errors
+    try:
+        import glob
+        # Find the Winget installation of FFmpeg which contains ffprobe
+        winget_path = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'WinGet', 'Packages')
+        ffmpeg_paths = glob.glob(os.path.join(winget_path, 'Gyan.FFmpeg*', '*', 'bin'))
+        
+        for path in ffmpeg_paths:
+            if path not in os.environ['PATH']:
+                os.environ['PATH'] = path + os.pathsep + os.environ['PATH']
+                print(f"Injected FFmpeg/ffprobe path: {path}")
+    except Exception as e:
+        print(f"Note: Could not auto-inject FFmpeg path: {e}")
+
 def start():
+    inject_ffmpeg()
     print(f"Launching SadTalker Web UI")
     from app_sadtalker import sadtalker_demo
     demo = sadtalker_demo()
     demo.queue()
-    demo.launch()
+    demo.launch(server_name="0.0.0.0", share=False, show_error=True)
 
 if __name__ == "__main__":
     prepare_environment()

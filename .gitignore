@@ -172,3 +172,8 @@ checkpoints
 
 # Mac
 .DS_Store
+
+# Modernization test files
+.gradio/
+test_*.py
+test_results/

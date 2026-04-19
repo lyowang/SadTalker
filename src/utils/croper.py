@@ -25,7 +25,7 @@ class Preprocesser:
         :return: np.array shape=(68, 2)
         """
         with torch.no_grad():
-            dets = self.predictor.det_net.detect_faces(img_np, 0.97)
+            dets = self.predictor.det_net.detect_faces(img_np, 0.50)
 
         if len(dets) == 0:
             return None
@@ -128,7 +128,7 @@ class Preprocesser:
         lm = self.get_landmark(img_np)
 
         if lm is None:
-            raise 'can not detect the landmark from source image'
+            raise Exception('can not detect the landmark from source image')
         rsize, crop, quad = self.align_face(img=Image.fromarray(img_np), lm=lm, output_size=xsize)
         clx, cly, crx, cry = crop
         lx, ly, rx, ry = quad
